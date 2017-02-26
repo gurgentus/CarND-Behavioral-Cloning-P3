@@ -91,6 +91,16 @@ At this point I could spend some time on designing the architecture to introduce
 
 At this point I was very comfortable with the general pipeline, so the next task was to introduce some balance to the data, increasing the training set, and start adding more complicated architecture and testing on a faster machine.
 
+My strategy for training data was to use the Udacity data set and augment it with some more training data on the simulator where I would concentrate on adding recovery movements.  I gave a different name to this new training data file and would make only corrections when the car would approach side of the road.  This resulted in good training data for recovery, but since I would wait until the car approached the side before doing any steering, I expected the data corresponding to no steering to be bad, so when reading this data I would ignore data with 0 steering angle.
+
+I did a similar training for driving in the opposite direction (I used extra training instead of flipping image).  Finally when reading the udacity data I would only read every fifth of 0 steering data to balance the data.
+
+With these modifications and still a very basic architecture I newly trained the model with 10 epochs and about 11,000 images.  At this point the car was able to navigate (not perfectly) until the bridge and would crash.  Next I decided to not change anything except to do more training.  This gave a good opportunity to practice with loading weights from the already achieved training.  So I loaded the weights and trained for 1 more epoch still with 11,000.  The results were good.  The car was now able to navigate a full track with mostly very nice driving except for a couple of places where it got too close to the edge of the road, but did recover.  Unfortunately it went of course on the second lap.
+
+It was now time to improve the augmentation and architecture.  First I added a 2d cropping layer to make the training more efficient.  
+
+This gave me a chance to think about combining additional architecture steps with loading the weights from a previous architecture.  I also added jungle map training into the mix.
+
 The overall strategy for deriving a model architecture was to ...
 
 My first step was to use a convolution neural network model similar to the ... I thought this model might be appropriate because ...

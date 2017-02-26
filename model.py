@@ -4,28 +4,31 @@ import numpy as np
 from keras.models import Model
 from keras.models import Sequential
 from keras.layers import Input, Dense, Activation, Flatten, Dropout, Lambda
-from keras.layers.convolutional import Convolution2D
+from keras.layers.convolutional import Convolution2D, Cropping2D
 from keras.layers.pooling import MaxPooling2D
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
 from sklearn.utils import shuffle
 from sklearn.model_selection import train_test_split
-import cv2
+import cv2, random
 import pandas as pd
 import seaborn as sns
+from keras import backend as K
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 
 # command line flags
+flags.DEFINE_string('testing', False, "Testing flag")
 flags.DEFINE_string('training_file', '', "Bottleneck features training file (.p)")
 flags.DEFINE_string('validation_file', '', "Bottleneck features validation file (.p)")
 flags.DEFINE_integer('epochs', 50, "The number of epochs.")
 flags.DEFINE_integer('batch_size', 256, "The batch size.")
 
 def process_image(image):
-    # do nothing
+    d = random.randint(-3, 3)
+    image = image * (1-d/10)
     return image
 
 def load_data():
@@ -35,16 +38,61 @@ def load_data():
     car_images = []
     steering_angles = []
 
+
     with open('data/driving_log.csv', 'r') as f:
         reader = csv.reader(f) #, delimiter =', ')
         next(reader)
         count = 0
         file_row_array = []
         angles = np.array([])
+        zeroCount = 0
         for row in reader:
-            file_row_array.append([row[0].strip(), row[1].strip(), row[2].strip(), row[3].strip()])
-            angles = np.append(angles, float(row[3].strip()))
-    print(angles)
+
+            angle = float(row[3].strip())
+            if angle == 0:
+                zeroCount = zeroCount + 1
+
+            if angle != 0 or zeroCount == 5:
+                file_row_array.append([row[0].strip(), row[1].strip(), row[2].strip(), row[3].strip()])
+                angles = np.append(angles, angle)
+
+            if zeroCount == 5:
+                zeroCount = 0
+
+    # read data from left biased
+    with open('data/driving_left_log.csv', 'r') as f:
+        reader = csv.reader(f) #, delimiter =', ')
+        next(reader)
+        count = 0
+        for row in reader:
+            angle = float(row[3].strip())
+            if angle != 0:
+                file_row_array.append([row[0].strip(), row[1].strip(), row[2].strip(), row[3].strip()])
+                angles = np.append(angles, angle)
+
+    # read data from right biased
+    with open('data/driving_right_log.csv', 'r') as f:
+        reader = csv.reader(f) #, delimiter =', ')
+        next(reader)
+        count = 0
+        for row in reader:
+            angle = float(row[3].strip())
+            if angle != 0:
+                file_row_array.append([row[0].strip(), row[1].strip(), row[2].strip(), row[3].strip()])
+                angles = np.append(angles, angle)
+
+    # read data from jungle
+    # read data from right biased
+    # with open('data/driving_jungle_log.csv', 'r') as f:
+    #     reader = csv.reader(f) #, delimiter =', ')
+    #     next(reader)
+    #     count = 0
+    #     for row in reader:
+    #         angle = float(row[3].strip())
+    #         file_row_array.append([row[0].strip(), row[1].strip(), row[2].strip(), row[3].strip()])
+    #         angles = np.append(angles, angle)
+
+
     plt.figure()
     sns.distplot(angles)
     return file_row_array
@@ -69,7 +117,7 @@ def load_data():
     #
     # arr = [np.array(image1), np.array(image2), np.array(image3), np.array(image4), np.array(image5)]
 
-def generator(samples, extra_cameras, batch_size=32):
+def generator(samples, extra_cameras, batch_size=2048):
     num_samples = len(samples)
     if extra_cameras:
         batch_size = batch_size // 3
@@ -83,7 +131,7 @@ def generator(samples, extra_cameras, batch_size=32):
             steering_angles = []
             for batch_sample in batch_samples:
                 name = './data/IMG/'+batch_sample[0].split('/')[-1]
-                img_center = cv2.imread(name)
+                img_center = process_image(cv2.imread(name))
                 steering_center = float(batch_sample[3])
                 car_images.append(img_center)
                 steering_angles.append(steering_center)
@@ -92,11 +140,11 @@ def generator(samples, extra_cameras, batch_size=32):
                     correction = 0.2 # this is a parameter to tune
 
                     name = './data/IMG/'+batch_sample[1].split('/')[-1]
-                    img_left = cv2.imread(name)
+                    img_left = process_image(cv2.imread(name))
                     steering_left = float(batch_sample[3]) + correction
 
                     name = './data/IMG/'+batch_sample[2].split('/')[-1]
-                    img_right = cv2.imread(name)
+                    img_right = process_image(cv2.imread(name))
                     steering_right = float(batch_sample[3]) - correction
 
                     # add images and angles to data set
@@ -118,7 +166,7 @@ def main(_):
     row_data = shuffle(row_data)
 
 
-    train_samples, validation_samples = train_test_split(row_data[0:5], train_size=0.8)
+    train_samples, validation_samples = train_test_split(row_data[0:20000], train_size=0.8)
 
     print(train_samples)
     print(validation_samples)
@@ -147,14 +195,36 @@ def main(_):
     # model.add(... finish defining the rest of your model architecture here ...)
 
 
+    testing = FLAGS.testing
     # Flow 0
     model = Sequential()
-    model.add(Lambda(lambda x: (x / 255.0) - 0.5, input_shape=(160,320,3)))
-    model.add(Convolution2D(32, 1, 1))
+
+    model.add(Cropping2D(cropping=((50,25), (0,0)), input_shape=(160,320,3)))
+
+    # Visualize for testing purposes
+    if testing:
+        layer_output = K.function([model.layers[0].input],
+                                      [model.layers[0].output])
+        input_image = cv2.imread('./data/IMG/'+train_samples[0][0].split('/')[-1])
+        cropped_image = layer_output([input_image[None,...]])[0][0,...]
+        plt.figure()
+        plt.imshow(input_image)
+        plt.figure()
+        plt.imshow(cropped_image)
+        plt.show()
+
+    model.add(Lambda(lambda x: (x / 255.0) - 0.5,  input_shape=(160,320,3)))
+    model.add(Convolution2D(32, 3, 3))
     model.add(MaxPooling2D((2, 2)))
+    model.add(Dropout(0.5))
+    model.add(Activation('relu'))
+    model.add(Dense(128, name="dense2"))
+    model.add(Convolution2D(32, 3, 3))
+    model.add(MaxPooling2D((2, 2)))
+    model.add(Dropout(0.5))
     model.add(Activation('relu'))
     model.add(Flatten())
-    model.add(Dense(1))
+    model.add(Dense(1, name="dense1"))
 
 
     # Flow 1
@@ -191,8 +261,6 @@ def main(_):
     #history = model.fit(X_normalized, y_one_hot, nb_epoch=3, validation_split=0.2)
     #model.compile('adam', 'sparse_categorical_crossentropy', ['accuracy'])
 
-    model.compile(optimizer="adam", loss="mse")
-
 
     #model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
@@ -201,25 +269,29 @@ def main(_):
 
 
     #history = model.fit(X_normalized, y_one_hot, batch_size=128, nb_epoch=2, validation_split=0.2)
-    print(len(train_samples))
-    history_object = model.fit_generator(generator = train_generator, samples_per_epoch =
-        3*len(train_samples), validation_data =
-        validation_generator,
-        nb_val_samples = len(validation_samples),
-        nb_epoch=20, verbose=1)
-    model.save('model.h5')
-    ### print the keys contained in the history object
-    print(history_object.history.keys())
+    if not testing:
+        model.load_weights('model5.h5')
+        #weights = model.layers[5].get_weights()
 
-    ### plot the training and validation loss for each epoch
-    plt.figure()
-    plt.plot(history_object.history['loss'])
-    plt.plot(history_object.history['val_loss'])
-    plt.title('model mean squared error loss')
-    plt.ylabel('mean squared error loss')
-    plt.xlabel('epoch')
-    plt.legend(['training set', 'validation set'], loc='upper right')
-    plt.show()
+        model.compile(optimizer="adam", loss="mse")
+        history_object = model.fit_generator(generator = train_generator, samples_per_epoch =
+            3*len(train_samples), validation_data =
+            validation_generator,
+            nb_val_samples = len(validation_samples),
+            nb_epoch=FLAGS.epochs, verbose=1)
+        model.save('model.h5')
+        ### print the keys contained in the history object
+        print(history_object.history.keys())
+
+        ### plot the training and validation loss for each epoch
+        plt.figure()
+        plt.plot(history_object.history['loss'])
+        plt.plot(history_object.history['val_loss'])
+        plt.title('model mean squared error loss')
+        plt.ylabel('mean squared error loss')
+        plt.xlabel('epoch')
+        plt.legend(['training set', 'validation set'], loc='upper right')
+        plt.show()
 
     # preprocess data
     #X_normalized_test = np.array(X_test / 255.0 - 0.5 )
